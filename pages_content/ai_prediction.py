@@ -19,6 +19,9 @@ pages_content/ai_prediction.py
 - เพิ่มตัวแปร acc_val, baseline_val, reliability_low ต้นฟังก์ชัน render() (ใช้ร่วมกันทั้ง r3_c1 และ r3_c4)
 - r3_c1 (MODEL PERFORMANCE): เพิ่มบรรทัด "vs. Baseline" เทียบ accuracy จริงกับ baseline (naive majority-class)
 - r3_c4 (AI RECOMMENDATION): เพิ่ม badge "LOW RELIABILITY" สีแดง เมื่อ accuracy < 50%
+- r1_c1 (AI PREDICTION SUMMARY): เอาบรรทัด "Test Accuracy" ออก ตามที่ขอ
+- r1_c2 (PREDICTION PROBABILITY): แก้สูตรจุดปลายเส้น gauge จาก x เชิงเส้น+y แบบ sin (ทำให้จุดไม่อยู่บนวงกลม
+  เดียวกับกรอบเทา) เป็น x,y แบบ cos/sin คู่กันบนวงกลมรัศมี 40 จุดเดียวกับกรอบ ทำให้สีเติมเต็มกรอบพอดีทุก %
 """
 import streamlit as st
 import pandas as pd
@@ -60,16 +63,19 @@ def render(ctx):
     <div style="color:{ai_color}; font-size:16px; font-weight:bold;">{ai_status}</div><div style="color:#64748B; font-size:12.5px; letter-spacing:0.5px;">PREDICTION</div>
     <div style="color:{ai_color}; font-size:13px; letter-spacing:1px; margin-top:2px;">{'★'*ai_stars}{'☆'*(5-ai_stars)}</div></div>
     <div style="text-align:right;"><div style="font-size:13px; color:#64748B;">Prediction Score</div><div style="font-size:28px; font-weight:bold; color:{ai_color}; line-height:1.1;">{ai_score}<span style="font-size:15px; color:#64748B;">/100</span></div>
-    <div style="font-size:13px; color:#64748B;">Test Accuracy</div><div style="font-size:16.5px; font-weight:bold; color:#10B981;">{acc_val:.1f}%</div></div></div>
+    </div></div>
     <p style="font-size:13px; color:#CBD5E1; line-height:1.35; margin:0;">โมเดล Random Forest คาดการณ์ทิศทางราคาหุ้น <b>{ctx.selected_ticker}</b> ใน 10 วันทำการถัดไป จาก technical indicators จริง (Train: 2023-2024 / Test: 2025)</p>
     </div>""", unsafe_allow_html=True)
 
     with r1_c2:
+        _t = min(1, max(0, prob_up / 100))
+        _gx = 50 - 40 * np.cos(np.pi * _t)
+        _gy = 50 - 40 * np.sin(np.pi * _t)
         st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; padding:16px; min-height:260px; display:flex; flex-direction:column; justify-content:space-between; text-align:center;">
     <div style="font-size:14.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px; text-align:left;">PREDICTION PROBABILITY</div>
     <div style="margin:auto 0;"><svg viewBox="0 0 100 55" style="width:150px; height:95px; display:block; margin:0 auto;">
     <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#1E293B" stroke-width="9" stroke-linecap="round" />
-    <path d="M 10 50 A 40 40 0 0 1 {10 + 80*min(1,prob_up/100):.1f} {50 - (40*np.sin(np.pi*min(1,prob_up/100))):.1f}" fill="none" stroke="{ai_color}" stroke-width="9" stroke-linecap="round" />
+    <path d="M 10 50 A 40 40 0 0 1 {_gx:.1f} {_gy:.1f}" fill="none" stroke="{ai_color}" stroke-width="9" stroke-linecap="round" />
     <text x="50" y="38" text-anchor="middle" font-size="20" font-weight="bold" fill="#FFFFFF">{prob_up:.0f}%</text>
     <text x="50" y="47" text-anchor="middle" font-size="9.5" fill="#94A3B8">Probability of</text>
     <text x="50" y="54" text-anchor="middle" font-size="10.5" font-weight="bold" fill="{ai_color}">{ai_status}</text></svg></div>
