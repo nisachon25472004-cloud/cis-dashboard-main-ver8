@@ -14,6 +14,11 @@ pages_content/ai_prediction.py
     ctx.current_price, ctx.change_pct, ctx.change_val, ctx.change_color, ctx.change_sign, ctx.arrow_sign
 
 ห้ามแก้ CSS ส่วนกลางหรือ helper function ใน common.py จากไฟล์นี้ — ถ้าจำเป็นต้องแก้ ให้แจ้ง Layout Lead ก่อน
+
+=== CHANGELOG ===
+- เพิ่มตัวแปร acc_val, baseline_val, reliability_low ต้นฟังก์ชัน render() (ใช้ร่วมกันทั้ง r3_c1 และ r3_c4)
+- r3_c1 (MODEL PERFORMANCE): เพิ่มบรรทัด "vs. Baseline" เทียบ accuracy จริงกับ baseline (naive majority-class)
+- r3_c4 (AI RECOMMENDATION): เพิ่ม badge "LOW RELIABILITY" สีแดง เมื่อ accuracy < 50%
 """
 import streamlit as st
 import pandas as pd
@@ -31,9 +36,9 @@ def render(ctx):
     ai_color = "#10B981" if ai_score >= 70 else ("#F59E0B" if ai_score >= 45 else "#EF4444")
     prob_up = safe(ctx.stock_info.get('prob_up'), 50)
     down_prob = round(100 - prob_up, 1)
-    acc_val = safe(ctx.stock_info.get('accuracy'), 50)                    # <-- เพิ่มบรรทัดนี้
-    baseline_val = safe(ctx.stock_info.get('baseline_accuracy'), acc_val) # <-- เพิ่มบรรทัดนี้
-    reliability_low = acc_val < 50 
+    acc_val = safe(ctx.stock_info.get('accuracy'), 50)
+    baseline_val = safe(ctx.stock_info.get('baseline_accuracy'), acc_val)
+    reliability_low = acc_val < 50
 
     st.markdown(f"""<div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:15px;">
     <div><div style="font-size:14.5px; color:#64748B; margin-bottom:2px;">Home / Module 4 / AI Prediction</div>
@@ -55,7 +60,7 @@ def render(ctx):
     <div style="color:{ai_color}; font-size:16px; font-weight:bold;">{ai_status}</div><div style="color:#64748B; font-size:12.5px; letter-spacing:0.5px;">PREDICTION</div>
     <div style="color:{ai_color}; font-size:13px; letter-spacing:1px; margin-top:2px;">{'★'*ai_stars}{'☆'*(5-ai_stars)}</div></div>
     <div style="text-align:right;"><div style="font-size:13px; color:#64748B;">Prediction Score</div><div style="font-size:28px; font-weight:bold; color:{ai_color}; line-height:1.1;">{ai_score}<span style="font-size:15px; color:#64748B;">/100</span></div>
-    <div style="font-size:13px; color:#64748B;">Test Accuracy</div><div style="font-size:16.5px; font-weight:bold; color:#10B981;">{safe(ctx.stock_info.get('accuracy')):.1f}%</div></div></div>
+    <div style="font-size:13px; color:#64748B;">Test Accuracy</div><div style="font-size:16.5px; font-weight:bold; color:#10B981;">{acc_val:.1f}%</div></div></div>
     <p style="font-size:13px; color:#CBD5E1; line-height:1.35; margin:0;">โมเดล Random Forest คาดการณ์ทิศทางราคาหุ้น <b>{ctx.selected_ticker}</b> ใน 10 วันทำการถัดไป จาก technical indicators จริง (Train: 2023-2024 / Test: 2025)</p>
     </div>""", unsafe_allow_html=True)
 
@@ -147,15 +152,15 @@ def render(ctx):
         st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; padding:14px; min-height:290px; display:flex; flex-direction:column; justify-content:space-between;">
     <div><div style="font-size:13.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px;">MODEL PERFORMANCE (TEST SET 2025, actual)</div>
     <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:6px; margin-top:10px; text-align:center;">
-    <div style="background:#151E2F; border:1px solid #1E293B; border-radius:6px; padding:6px 2px;"><div style="font-size:12px; color:#64748B;">Accuracy</div><div style="font-size:16px; font-weight:bold; color:#F8FAFC;">{safe(ctx.stock_info.get('accuracy')):.1f}%</div></div>
+    <div style="background:#151E2F; border:1px solid #1E293B; border-radius:6px; padding:6px 2px;"><div style="font-size:12px; color:#64748B;">Accuracy</div><div style="font-size:16px; font-weight:bold; color:#F8FAFC;">{acc_val:.1f}%</div></div>
     <div style="background:#151E2F; border:1px solid #1E293B; border-radius:6px; padding:6px 2px;"><div style="font-size:12px; color:#64748B;">Precision</div><div style="font-size:16px; font-weight:bold; color:#F8FAFC;">{safe(ctx.stock_info.get('precision')):.1f}%</div></div>
     <div style="background:#151E2F; border:1px solid #1E293B; border-radius:6px; padding:6px 2px;"><div style="font-size:12px; color:#64748B;">ROC-AUC</div><div style="font-size:16px; font-weight:bold; color:#F8FAFC;">{safe(ctx.stock_info.get('roc_auc')):.2f}</div></div>
     <div style="background:#151E2F; border:1px solid #1E293B; border-radius:6px; padding:6px 2px;"><div style="font-size:12px; color:#64748B;">F1-Score</div><div style="font-size:16px; font-weight:bold; color:#F8FAFC;">{safe(ctx.stock_info.get('f1_score')):.1f}%</div></div>
     </div></div>
-    <div style="font-size:11.5px; color:{'#EF4444' if acc_val < safe(ctx.stock_info.get('baseline_accuracy'), acc_val) else '#10B981'}; border-top:1px dashed #1E293B; padding-top:5px; margin-top:4px;">
-    vs. Baseline (naive majority-class): {safe(ctx.stock_info.get('baseline_accuracy')):.1f}%
+    <div style="font-size:11.5px; color:{'#EF4444' if acc_val < baseline_val else '#10B981'}; border-top:1px dashed #1E293B; padding-top:5px; margin-top:4px;">
+    vs. Baseline (naive majority-class): {baseline_val:.1f}%
     </div>
-    </div></div><div style="font-size:11.5px; color:#64748B; border-top:1px solid #1E293B; padding-top:6px;">Validation: Out-of-time (Train 2023-24 / Test 2025)</div>
+    <div style="font-size:11.5px; color:#64748B; border-top:1px solid #1E293B; padding-top:6px;">Validation: Out-of-time (Train 2023-24 / Test 2025)</div>
     </div>""", unsafe_allow_html=True)
 
     with r3_c2:
@@ -176,7 +181,7 @@ def render(ctx):
             )
             show_chart(fig_bt, key="ai_backtest", expand_height=550)
             hit_rate = ((bt['predicted_up_prob'] > 0.5).astype(int) == (bt['actual_close'].diff().shift(-1) > 0).astype(int)).mean() * 100
-            st.markdown(f"""<div style="background:#0F172A; border:1px solid #1E293B; border-top:none; border-radius:0 0 12px 12px; padding:0 12px 10px 12px; font-size:11.5px; color:#64748B;">* Test-set Accuracy: {safe(ctx.stock_info.get('accuracy')):.1f}%</div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div style="background:#0F172A; border:1px solid #1E293B; border-top:none; border-radius:0 0 12px 12px; padding:0 12px 10px 12px; font-size:11.5px; color:#64748B;">* Test-set Accuracy: {acc_val:.1f}%</div>""", unsafe_allow_html=True)
         else:
             st.info("ไม่มีข้อมูล Backtest")
 
@@ -186,28 +191,26 @@ def render(ctx):
     <div><div style="font-size:13.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px; margin-bottom:6px;">EXPLAINABLE AI SUMMARY ({ctx.selected_ticker})</div>
     <p style="font-size:13px; color:#CBD5E1; line-height:1.45; margin:0 0 8px 0;">โมเดลประเมินความน่าจะเป็นขาขึ้นสำหรับ <b>{ctx.selected_ticker}</b> อยู่ที่ <b>{prob_up:.0f}%</b> โดย feature ที่มีอิทธิพลสูงสุดคือ <b>{top_feat}</b>:</p>
     <div style="font-size:12.5px; color:#CBD5E1; line-height:1.5; display:flex; flex-direction:column; gap:4px;">
-    <div style="display:flex; gap:6px;"><span style="color:#10B981;">✔</span><span>Test Accuracy บนข้อมูลปี 2025 อยู่ที่ {safe(ctx.stock_info.get('accuracy')):.1f}%</span></div>
+    <div style="display:flex; gap:6px;"><span style="color:#10B981;">✔</span><span>Test Accuracy บนข้อมูลปี 2025 อยู่ที่ {acc_val:.1f}%</span></div>
     <div style="display:flex; gap:6px;"><span style="color:#10B981;">✔</span><span>ROC-AUC = {safe(ctx.stock_info.get('roc_auc')):.2f} (ยิ่งใกล้ 1 ยิ่งแยกแยะได้ดี)</span></div>
     <div style="display:flex; gap:6px;"><span style="color:#10B981;">✔</span><span>Signal ปัจจุบัน: {ctx.stock_info.get('ai_signal','-')}</span></div>
     </div></div></div>""", unsafe_allow_html=True)
 
     with r3_c4:
-    acc_val = safe(ctx.stock_info.get('accuracy'), 50)
-    reliability_badge = (
-        '<div style="display:inline-block; background:rgba(239,68,68,0.15); border:1px solid #EF4444; '
-        'color:#EF4444; font-size:10.5px; font-weight:bold; padding:2px 7px; border-radius:6px; margin-bottom:5px;">'
-        '⚠ LOW RELIABILITY</div>'
-    ) if acc_val < 50 else ""
+        reliability_badge = (
+            '<div style="display:inline-block; background:rgba(239,68,68,0.15); border:1px solid #EF4444; '
+            'color:#EF4444; font-size:10.5px; font-weight:bold; padding:2px 7px; border-radius:6px; margin-bottom:5px;">'
+            '⚠ LOW RELIABILITY</div>'
+        ) if reliability_low else ""
         st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; padding:14px; min-height:290px; display:flex; flex-direction:column; justify-content:space-between;">
-    <div><div style="font-size:13.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px;">AI RECOMMENDATION</div>
+    <div>{reliability_badge}<div style="font-size:13.5px; font-weight:bold; color:#94A3B8; letter-spacing:0.5px;">AI RECOMMENDATION</div>
     <div style="display:flex; align-items:center; gap:8px; margin:8px 0 4px 0;"><div>
     <div style="font-size:23px; font-weight:bold; color:{ai_color}; line-height:1;">{ctx.stock_info.get('ai_signal','-')}</div>
     <div style="font-size:12.5px; font-weight:bold; color:{ai_color};">Prob. Up: {prob_up:.0f}%</div></div></div>
     <div style="font-size:12.5px; color:#CBD5E1; border-top:1px dashed #1E293B; padding-top:6px; margin-top:4px;">
     <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span style="color:#64748B;">Target Period</span><b style="color:#F8FAFC;">10 Trading Days</b></div>
-    <div style="display:flex; justify-content:space-between;"><span style="color:#64748B;">Model Accuracy</span><b style="color:#F59E0B;">{safe(ctx.stock_info.get('accuracy')):.1f}%</b></div>
+    <div style="display:flex; justify-content:space-between;"><span style="color:#64748B;">Model Accuracy</span><b style="color:#F59E0B;">{acc_val:.1f}%</b></div>
     </div></div><div style="font-size:11.5px; color:#64748B; text-align:center;">โปรดใช้ประกอบการตัดสินใจลงทุน ไม่ใช่คำแนะนำโดยตรง</div>
     </div>""", unsafe_allow_html=True)
 
     render_nav_footer("m4", prev_page=" ⏱️ Entry Timing", next_page=" 🛡️ Risk Analysis")
-
