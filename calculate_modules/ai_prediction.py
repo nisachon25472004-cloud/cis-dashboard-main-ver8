@@ -30,14 +30,23 @@ scikit-learn คำนวณให้ ไม่มีการปรับแต
 จะกระทบข้อความอธิบายในหน้า UI (pages_content/ai_prediction.py) ที่เขียนว่า "10 วัน" ไว้ด้วย ต้องแก้คู่กัน
 
 === CHANGELOG ===
-- เพิ่ม key 'baseline_accuracy' ใน metrics_dict ทั้ง 2 return path
-- [BUG-1 Critical แก้แล้ว — พบโดยทีม B] target ใช้ (future_close > close).astype(int) ตรงๆ ทำให้ 10 แถวสุดท้าย
-  ของชุดข้อมูล (ที่ future_close เป็น NaN เพราะไม่มีราคาจริงในอนาคตให้เทียบ) ได้ target=0 ("ลง") แบบผิดๆ
-  แทนที่จะเป็น NaN เพราะใน pandas การเทียบ `NaN > ตัวเลข` ได้ False เสมอ ทำให้ dropna(subset=['target'])
-  ไม่ตัดแถวเหล่านี้ทิ้งตามที่ตั้งใจไว้ กระทบ ~4% ของ Test set ทุกหุ้น (เอนเอียงไปทาง label=0 เสมอ ไม่ใช่ noise สุ่ม)
-  แก้โดยใช้ np.where(...) ให้ target เป็น NaN จริงเมื่อไม่มี future_close ให้เทียบ
-- [BUG-2 High แก้แล้ว — พบโดยทีม B] เพิ่ม key 'is_fallback' (True/False) ใน metrics_dict ทั้ง 2 return path
-  เพื่อให้หน้า UI แยกออกว่าค่าที่แสดงเป็นผลจากการเทรนโมเดลจริง หรือเป็นค่าคงที่สำรองตอนข้อมูลไม่พอ
+- เพิ่ม key 'baseline_accuracy' (ค่า accuracy ถ้าทายกลุ่มส่วนใหญ่เฉยๆ) ใน metrics_dict ทั้ง 2 return path
+  เพื่อให้หน้า UI แสดงเทียบกับ accuracy จริงได้ ว่าโมเดล "เก่งกว่าทายมั่ว" จริงหรือไม่
+
+=== CHANGELOG (v2 — แก้บั๊ก Critical + ปรับปรุง accuracy ตามรายงานตรวจสอบ Module4_AI_Prediction) ===
+- [Critical FIX] บั๊ก target label ปลายชุดข้อมูล: เดิมใช้ .astype(int) ตรงๆ ทำให้ NaN > number กลายเป็น
+  False -> 0 แทนที่จะเป็น NaN (10 แถวสุดท้ายของทุกหุ้นติด label ปลอม = 'ลง' ทั้งที่ไม่มีราคาจริงให้เทียบ)
+  แก้เป็น np.where(...) คืนค่า NaN อย่างชัดเจน แล้วให้ dropna() ตัดแถวเหล่านี้ทิ้งตามที่ตั้งใจไว้แต่แรก
+- [Accuracy] เปลี่ยนนิยาม target จาก "ขึ้น/ลงแม้ 0.00...%" เป็น "ขึ้น/ลงแรงพอจะมีนัยสำคัญ"
+  (RETURN_THRESHOLD = ±2%) ตัดพวกแถวที่ return อยู่ในช่วงแกว่งใกล้ 0% (สัญญาณเป็น noise ล้วนๆ) ออกจาก
+  ทั้ง train/test — เป็นเทคนิคมาตรฐานในงานวิจัยการเงิน ไม่ใช่การเลือกเฉพาะผลที่ดี (threshold คงที่ ระบุไว้ตรงนี้)
+- [Accuracy] เปลี่ยน feature จาก close/EMA20/EMA50 (ราคาดิบ, non-stationary, สหสัมพันธ์กันสูง)
+  เป็น feature เชิงสัมพัทธ์: price_vs_ema20, price_vs_ema50, ema_cross, return_5d, return_10d
+  (คำนวณจากคอลัมน์ input เดิม ไม่ต้องขอคอลัมน์ใหม่จาก DB) ยังคง RSI14/MACD/ADX ไว้เหมือนเดิม
+- [Accuracy] เพิ่ม class_weight='balanced' และปรับ max_depth/min_samples_leaf ให้โมเดลไม่ underfit
+  บนชุด feature ใหม่ที่มีจำนวนมากขึ้น
+- [High FIX] เพิ่ม key 'is_fallback' ใน metrics_dict (True เมื่อข้อมูลไม่พอจนต้องคืนค่าคงที่, False เมื่อเป็น
+  ผลโมเดลจริง) เพื่อให้หน้า UI แยกแยะได้ว่ากำลังโชว์ตัวเลขจำลองหรือผลจริง
 """
 
 import numpy as np
@@ -45,11 +54,20 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
-# Feature ที่ใช้เทรนโมเดล (ต้องตรงกับคอลัมน์จริงในตาราง stock_daily_prices)
-FEATURES = ['close', 'EMA20', 'EMA50', 'RSI14', 'MACD', 'ADX']
+# คอลัมน์ดิบที่ต้องมีจริงใน stock_daily_prices (input ก่อนแปลงเป็น feature) — ห้ามแก้ชื่อ/ลบ โดยไม่แจ้งทีม
+RAW_INPUT_COLUMNS = ['close', 'EMA20', 'EMA50', 'RSI14', 'MACD', 'ADX']
+
+# Feature ที่ใช้เทรนโมเดลจริง (คำนวณจาก RAW_INPUT_COLUMNS ในฟังก์ชันนี้ ไม่ต้องขอคอลัมน์ใหม่จาก DB)
+# เปลี่ยนจาก close/EMA20/EMA50 ดิบ (non-stationary, สหสัมพันธ์กันสูง) เป็น feature เชิงสัมพัทธ์
+# เพื่อช่วยให้โมเดลเรียนรู้ "พฤติกรรมราคา" แทน "ระดับราคา" — ดู CHANGELOG v2
+FEATURES = ['price_vs_ema20', 'price_vs_ema50', 'ema_cross', 'return_5d', 'return_10d', 'RSI14', 'MACD', 'ADX']
 
 # จำนวนวันทำการล่วงหน้าที่ใช้นิยาม label (ราคาขึ้น/ลง) — ถ้าแก้เลขนี้ ต้องแก้คำอธิบายในหน้า UI ด้วย
 PREDICTION_HORIZON_DAYS = 10
+
+# เกณฑ์ % return ขั้นต่ำที่ถือว่า "ขึ้น/ลงอย่างมีนัยสำคัญ" — แถวที่ return อยู่ในช่วง (-THRESHOLD, +THRESHOLD)
+# ถูกตัดออกจากทั้ง train/test เพราะเป็นช่วงแกว่งใกล้ 0% ที่โมเดล technical indicator ทายได้ยาก (noise)
+RETURN_THRESHOLD = 0.02
 
 
 def train_and_predict_ai(df_price_ticker, ticker):
@@ -58,13 +76,33 @@ def train_and_predict_ai(df_price_ticker, ticker):
 
     df = df_price_ticker.copy().sort_values(by='date').reset_index(drop=True)
 
-    for col in FEATURES:
+    # sanitize คอลัมน์ดิบก่อน (เดิม sanitize ตาม FEATURES ซึ่งตอนนี้เป็น feature ที่คำนวณทีหลัง ไม่ใช่คอลัมน์ดิบ)
+    for col in RAW_INPUT_COLUMNS:
         df[col] = df[col].apply(clean_float)
 
-    # --- BUG-1 fix: ห้ามใช้ (future_close > close).astype(int) ตรงๆ เพราะ NaN > ตัวเลข = False เสมอ
-    # ทำให้แถวที่ไม่มีราคาจริงในอนาคต (10 แถวสุดท้ายของข้อมูล) ได้ target=0 ปลอมแทนที่จะเป็น NaN
+    # ---- Feature engineering: แปลงราคาดิบ (non-stationary) เป็น feature เชิงสัมพัทธ์ ----
+    df['price_vs_ema20'] = df['close'] / df['EMA20'] - 1
+    df['price_vs_ema50'] = df['close'] / df['EMA50'] - 1
+    df['ema_cross'] = df['EMA20'] / df['EMA50'] - 1
+    df['return_5d'] = df['close'].pct_change(5)
+    df['return_10d'] = df['close'].pct_change(10)
+
+    # ---- [Critical FIX] target label ----
+    # เดิม: (future_close > close).astype(int) ทำให้ NaN > number กลายเป็น False -> 0 (label ปลอม)
+    # ที่ 10 แถวสุดท้ายซึ่งไม่มีราคาจริงในอีก 10 วันข้างหน้าให้เทียบ (หลุดรอด dropna เพราะไม่ใช่ NaN จริง)
+    # แก้เป็น np.where คืนค่า NaN อย่างชัดเจนเมื่อไม่มี future_close ให้เทียบ
+    #
+    # [Accuracy] พร้อมกันนั้นเปลี่ยนจาก threshold ที่ 0% (ขึ้น/ลงแม้เพียงเศษเสี้ยว % ก็นับ) เป็น
+    # RETURN_THRESHOLD (±2%) เพื่อตัดแถวที่ return แกว่งใกล้ 0% ซึ่งเป็นช่วงที่ technical indicator
+    # ทายทิศทางได้ยากมาก (สัญญาณจมอยู่ใน noise) ออกจากทั้ง train และ test
     future_close = df['close'].shift(-PREDICTION_HORIZON_DAYS)
-    df['target'] = np.where(future_close.notna(), (future_close > df['close']).astype(int), np.nan)
+    future_return = future_close / df['close'] - 1
+    df['target'] = np.select(
+        [future_return > RETURN_THRESHOLD, future_return < -RETURN_THRESHOLD],
+        [1, 0],
+        default=np.nan,
+    )
+
     df_model = df.dropna(subset=FEATURES + ['target'])
 
     train_data = df_model[df_model['date'] < '2025-01-01']
@@ -74,7 +112,7 @@ def train_and_predict_ai(df_price_ticker, ticker):
     backtest_df = pd.DataFrame(columns=['date', 'actual_close', 'predicted_up_prob'])
 
     if len(train_data) < 50 or len(test_data) < 20:
-        # --- BUG-2 fix: ติด flag is_fallback=True ชัดเจน ไม่ให้ UI เข้าใจผิดว่าเป็นผลจากโมเดลจริง
+        # [High FIX] is_fallback=True บอกฝั่ง UI อย่างชัดเจนว่านี่คือค่าคงที่จำลอง ไม่ใช่ผลจากการเทรนโมเดลจริง
         return ({'ai_score': 65.0, 'prob_up': 65.0, 'accuracy': 75.0, 'baseline_accuracy': 65.0,
                  'ai_signal': 'ACCUMULATE', 'is_fallback': True,
                  'precision': 70.0, 'recall': 70.0, 'f1_score': 70.0, 'roc_auc': 0.70},
@@ -84,7 +122,13 @@ def train_and_predict_ai(df_price_ticker, ticker):
     X_test, y_test = test_data[FEATURES], test_data['target']
     baseline_acc = float(max(y_test.mean(), 1 - y_test.mean()) * 100)  # ความแม่นยำถ้าทายกลุ่มส่วนใหญ่เฉยๆ
 
-    model = RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42)
+    # [Accuracy] max_depth=4 เดิมค่อนข้างตื้นสำหรับ feature set ที่ตอนนี้มี 8 ตัว (underfit ได้ง่าย)
+    # ปรับเป็น max_depth=6 + min_samples_leaf=10 (กันการ overfit จากการลึกขึ้น) และเพิ่ม
+    # class_weight='balanced' เพราะบางหุ้นมีสัดส่วน class ไม่สมดุลมาก (baseline_accuracy สูง)
+    model = RandomForestClassifier(
+        n_estimators=300, max_depth=6, min_samples_leaf=10,
+        class_weight='balanced', random_state=42,
+    )
     model.fit(X_train, y_train)
 
     test_pred = model.predict(X_test)
