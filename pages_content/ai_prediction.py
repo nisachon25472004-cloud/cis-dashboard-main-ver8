@@ -190,4 +190,149 @@ def render(ctx):
         )
  
     st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-top:none; border-radius:0 0 12px 12px; padding:16px;">
-<div style="display:flex; gap:16px; flex-wrap:wrap; a
+<div style="display:flex; gap:16px; flex-wrap:wrap; align-items:stretch;">
+<div style="flex:0 0 320px; max-width:100%; background-color:#0B1120; border:1px solid #1E293B; border-radius:12px; padding:22px 14px; display:flex; align-items:center; justify-content:center;">
+<svg viewBox="0 0 100 56" style="width:100%; max-width:290px; height:auto;">
+<path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#1E293B" stroke-width="9" stroke-linecap="round" />
+<path d="M 10 50 A 40 40 0 0 1 {_gx:.1f} {_gy:.1f}" fill="none" stroke="{status_color}" stroke-width="9" stroke-linecap="round" />
+<text x="50" y="47" text-anchor="middle" font-size="24" font-weight="bold" fill="#FFFFFF">{prob_up:.0f}%</text>
+</svg>
+</div>
+<div style="flex:1; min-width:300px; background-color:#1A2740; border:1px solid #2A3A55; border-left:4px solid {status_color}; border-radius:12px; padding:22px 26px; display:flex; flex-direction:column; justify-content:center;">
+<div style="font-size:14px; font-weight:bold; color:{MUTED}; letter-spacing:1px; margin-bottom:10px;">PROBABILITY OF UP</div>
+<div style="font-size:18px; color:#E2E8F0; line-height:1.7;">โมเดล Random Forest ประเมินว่า <b>{ctx.selected_ticker}</b> มีโอกาส<b style="color:{status_color};">{direction_th}</b> <b>{dir_prob:.0f}%</b> ในอีก 10 วันทำการ</div>
+<div style="font-size:18px; color:#E2E8F0; line-height:1.7;">ด้วยความแม่นยำการทดสอบ <b>{acc_val:.1f}%</b> ({baseline_note}เกณฑ์เปรียบเทียบ {baseline_val:.1f}%) &nbsp;→&nbsp; คำแนะนำ: <b style="color:{status_color};">{signal}</b></div>
+<div style="font-size:14.5px; color:{MUTED}; line-height:1.6; margin-top:12px;">โปรดใช้ประกอบการตัดสินใจลงทุน ควรพิจารณาร่วมกับ Fair Value และ Company Health ก่อนตัดสินใจ ไม่ใช่คำแนะนำโดยตรง</div>{warn_line}
+</div>
+</div>
+</div>""", unsafe_allow_html=True)
+ 
+    st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
+ 
+    # ============================================================
+    # 3) FORECAST — ตอบคำถาม "ราคาจะไปทางไหนในอนาคต"
+    # ============================================================
+    st.markdown(_section_title("📈 FORECAST — PRICE HISTORY + MODEL-IMPLIED RANGE"), unsafe_allow_html=True)
+ 
+    hist_tail = ctx.stock_daily.tail(150)
+    vol_annual = safe(ctx.stock_info.get('volatility'), 25.0) / 100
+    daily_vol = vol_annual / np.sqrt(252)
+    horizon_days = 10
+    future_dates = pd.bdate_range(start=hist_tail['date'].iloc[-1], periods=horizon_days + 1)[1:]
+    drift = (prob_up - 50) / 50 * daily_vol * horizon_days
+    t_arr = np.arange(1, horizon_days + 1)
+    median_path = ctx.current_price * (1 + drift * (t_arr / horizon_days))
+    band = ctx.current_price * daily_vol * np.sqrt(t_arr) * 1.28
+    upper_path = median_path + band
+    lower_path = median_path - band
+ 
+    fig_forecast = go.Figure()
+    fig_forecast.add_trace(go.Scatter(x=future_dates, y=lower_path, mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'))
+    fig_forecast.add_trace(go.Scatter(x=future_dates, y=upper_path, mode='lines', line=dict(width=0), fill='tonexty',
+                                       fillcolor=_hex_to_rgba(status_color, 0.18), name='Prediction Range', hoverinfo='skip'))
+    fig_forecast.add_trace(go.Scatter(x=future_dates, y=median_path, mode='lines', line=dict(color=status_color, width=2.2, dash='dash'), name='Model Forecast (Median)'))
+    fig_forecast.add_trace(go.Scatter(x=hist_tail['date'], y=hist_tail['close'], mode='lines', line=dict(color=BLUE, width=2.2), name='Actual Price'))
+ 
+    fig_forecast.update_layout(
+        height=350, margin=dict(l=45, r=25, t=10, b=30), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
+        xaxis=dict(gridcolor="#1E293B", tickfont=dict(size=13, color=MUTED), zeroline=False),
+        yaxis=dict(title=dict(text="Price (THB)", font=dict(size=13.5, color=MUTED)), gridcolor="#1E293B", tickfont=dict(size=13, color=MUTED), zeroline=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0, font=dict(size=13, color="#CBD5E1"))
+    )
+    show_chart(fig_forecast, key="ai_forecast", expand_height=700)
+    st.markdown(f"""<div style="font-size:14px; color:{MUTED}; line-height:1.6; padding:6px 18px 12px 18px; background:#0F172A; border:1px solid #1E293B; border-top:none; border-radius:0 0 12px 12px;">
+* เส้นทึบฟ้า = ราคาจริงที่เกิดขึ้นแล้ว | เส้นประสี = ค่ากลางที่โมเดลคาดการณ์ | แถบทึบแสง = ช่วงคาดการณ์ (~80%) จาก Volatility จริง ({safe(ctx.stock_info.get('volatility')):.1f}%) — ไม่ใช่การรับประกันผลตอบแทน</div>""", unsafe_allow_html=True)
+ 
+    st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
+ 
+    # ============================================================
+    # 4) MODEL EXPLANATION — ตอบคำถาม "โมเดลตัดสินใจจากอะไร"
+    # ============================================================
+    st.markdown(_section_title("MODEL EXPLANATION"), unsafe_allow_html=True)
+    exp_c1, exp_c2 = st.columns([1.4, 1])
+ 
+    fi = ctx.feat_imp_df[ctx.feat_imp_df['ticker'] == ctx.selected_ticker].sort_values('importance')
+ 
+    with exp_c1:
+        if not fi.empty:
+            fig_shap = go.Figure(go.Bar(
+                x=fi['importance'], y=fi['feature'], orientation='h', marker=dict(color=BLUE),
+                text=[f"{v:.3f}" for v in fi['importance']], textposition='outside', textfont=dict(size=13, color='#CBD5E1')
+            ))
+            fig_shap.update_layout(
+                height=310, margin=dict(l=10, r=50, t=15, b=15), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
+                xaxis=dict(gridcolor="#1E293B", tickfont=dict(size=13, color=MUTED), zeroline=False),
+                yaxis=dict(tickfont=dict(size=13.5, color="#CBD5E1"), gridcolor="#1E293B", zeroline=False), showlegend=False
+            )
+            show_chart(fig_shap, key="ai_feature_importance", expand_height=650)
+        else:
+            st.info("ไม่มีข้อมูล Feature Importance")
+ 
+    with exp_c2:
+        top_feat = fi.sort_values('importance', ascending=False).iloc[0]['feature'] if not fi.empty else "N/A"
+        st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; padding:22px; min-height:310px; display:flex; flex-direction:column; justify-content:center;">
+<div style="font-size:15.5px; font-weight:bold; color:{MUTED}; letter-spacing:0.5px; margin-bottom:12px;">EXPLAINABLE AI SUMMARY</div>
+<p style="font-size:17px; color:#CBD5E1; line-height:1.7; margin:0;">โมเดลใช้ 6 ตัวชี้วัดเชิงเทคนิคในการทำนาย โดย feature ที่มีอิทธิพลต่อผลทำนายของ <b>{ctx.selected_ticker}</b> สูงสุดคือ
+<b style="color:{BLUE};">{top_feat}</b> — ค่านี้มาจากน้ำหนักจริงที่ Random Forest เรียนรู้ได้ ไม่ใช่ค่าคงที่</p>
+</div>""", unsafe_allow_html=True)
+ 
+    st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
+ 
+    # ============================================================
+    # 5) MODEL PERFORMANCE — ตอบคำถาม "เชื่อโมเดลนี้ได้แค่ไหน"
+    # ============================================================
+    st.markdown(_section_title("📊 MODEL PERFORMANCE (TEST SET 2025, actual)"), unsafe_allow_html=True)
+    perf_c1, perf_c2 = st.columns([1, 1.3])
+ 
+    with perf_c1:
+        cells = "".join([
+            _metric_cell("Accuracy", f"{acc_val:.1f}%"),
+            _metric_cell("Precision", f"{safe(ctx.stock_info.get('precision')):.1f}%"),
+            _metric_cell("ROC-AUC", f"{safe(ctx.stock_info.get('roc_auc')):.2f}"),
+            _metric_cell("F1-Score", f"{safe(ctx.stock_info.get('f1_score')):.1f}%"),
+        ])
+        st.markdown(f"""<div style="background-color:#0F172A; border:1px solid #1E293B; border-top:none; border-radius:0 0 12px 12px; padding:16px; min-height:350px;">
+<div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px;">{cells}</div>
+<div style="font-size:15px; color:{RED if reliability_low else GREEN}; border-top:1px dashed #1E293B; padding-top:12px; margin-top:14px; line-height:1.55;">
+vs. Baseline (naive majority-class): <b>{baseline_val:.1f}%</b> — {"ต่ำกว่า baseline ⚠" if reliability_low else "สูงกว่า baseline ✓"}
+</div>
+<div style="font-size:13.5px; color:{MUTED}; border-top:1px solid #1E293B; padding-top:10px; margin-top:10px;">Validation: Out-of-time (Train 2023-24 / Test 2025)</div>
+</div>""", unsafe_allow_html=True)
+ 
+    with perf_c2:
+        st.markdown(_section_title("HISTORICAL PREDICTION PERFORMANCE (Test Set, actual)"), unsafe_allow_html=True)
+        bt = ctx.backtest_df[ctx.backtest_df['ticker'] == ctx.selected_ticker].sort_values('date') if not ctx.backtest_df.empty else pd.DataFrame()
+        if not bt.empty:
+            bt_q = bt.set_index('date').resample('W').mean(numeric_only=True).dropna().reset_index()
+            fig_bt = go.Figure()
+            fig_bt.add_trace(go.Scatter(x=bt_q['date'], y=bt_q['actual_close'], mode='lines', name='Actual Close', line=dict(color=BLUE, width=1.8), yaxis='y1'))
+            fig_bt.add_trace(go.Scatter(x=bt_q['date'], y=bt_q['predicted_up_prob'] * 100, mode='lines', name='Predicted Up Prob (%)', line=dict(color=status_color, width=1.8, dash='dash'), yaxis='y2'))
+            fig_bt.update_layout(
+                height=235, margin=dict(l=30, r=30, t=5, b=18), paper_bgcolor="#0F172A", plot_bgcolor="#0F172A",
+                xaxis=dict(tickfont=dict(size=12.5, color=MUTED), gridcolor="#1E293B"),
+                yaxis=dict(tickfont=dict(size=12.5, color=MUTED), gridcolor="#1E293B", zeroline=False),
+                yaxis2=dict(overlaying='y', side='right', showgrid=False, tickfont=dict(size=12.5, color=MUTED)),
+                showlegend=True, legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="left", x=0, font=dict(size=12.5, color="#CBD5E1"))
+            )
+            show_chart(fig_bt, key="ai_backtest", expand_height=550)
+            st.markdown(f"""<div style="background:#0F172A; border:1px solid #1E293B; border-top:none; border-radius:0 0 12px 12px; padding:8px 14px 12px 14px; font-size:13.5px; color:{MUTED};">* Test-set Accuracy: {acc_val:.1f}%</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("""<div style="background:#0F172A; border:1px solid #1E293B; border-top:none; border-radius:0 0 12px 12px; padding:20px;">""", unsafe_allow_html=True)
+            st.info("ไม่มีข้อมูล Backtest")
+            st.markdown("</div>", unsafe_allow_html=True)
+ 
+    with st.expander("📋 รายละเอียดโมเดลและข้อมูล (Model & Data Detail)"):
+        n_train = len(ctx.stock_daily[ctx.stock_daily['date'] < '2025-01-01'])
+        n_test = len(ctx.stock_daily[ctx.stock_daily['date'] >= '2025-01-01'])
+        st.markdown(f"""<ul style="font-size:16px; line-height:1.9; color:#CBD5E1; margin:0; padding-left:22px;">
+<li><b>Model</b>: Random Forest (n_estimators=200, max_depth=4)</li>
+<li><b>Target</b>: 10-Day Forward Direction (ราคาปิด 10 วันข้างหน้าสูงกว่าปัจจุบันหรือไม่)</li>
+<li><b>Train Samples</b>: {n_train} แถว (2023–2024)</li>
+<li><b>Test Samples</b>: {n_test} แถว (2025)</li>
+<li><b>Features</b>: 6 ตัว (Technical) — close, EMA20, EMA50, RSI14, MACD, ADX</li>
+<li><b>Data as of</b>: {ctx.stock_info.get('latest_date','-')}</li>
+<li><b>Validation</b>: Out-of-time (แบ่งตามช่วงเวลาจริง ไม่ใช่สุ่มแบ่ง)</li>
+</ul>""", unsafe_allow_html=True)
+ 
+    render_nav_footer("m4", prev_page=" ⏱️ Entry Timing", next_page=" 🛡️ Risk Analysis")
+ 
